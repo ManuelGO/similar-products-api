@@ -1,2 +1,8 @@
 server:
   port: 5000
+
+product-api:
+  base-url: http://localhost:3001
+
+detail-fetch:
+  pool-size: 32
