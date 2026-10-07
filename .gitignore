@@ -1,0 +1,17 @@
+# Claude Code local settings
+.claude/settings.local.json
+
+# macOS
+.DS_Store
+
+# Java / Maven
+target/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Environment / secrets
+.env
+.env.*
