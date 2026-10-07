@@ -2,6 +2,7 @@ package com.manuelgo.similarproducts.config;
 
 import com.manuelgo.similarproducts.application.SimilarProductsService;
 import com.manuelgo.similarproducts.domain.ProductCatalog;
+import java.util.concurrent.ThreadPoolExecutor;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -20,7 +21,10 @@ public class ApplicationConfiguration {
         // Fixed size: at most poolSize detail requests run concurrently.
         executor.setCorePoolSize(properties.poolSize());
         executor.setMaxPoolSize(properties.poolSize());
-        // Queue capacity is intentionally left at its default; SPEC-003 defines the saturation policy.
+        // Bounded backlog: when the pool and the queue are full, new tasks are rejected
+        // immediately instead of waiting, and the service omits those products.
+        executor.setQueueCapacity(properties.queueCapacity());
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
         executor.setThreadNamePrefix("detail-fetch-");
         return executor;
     }

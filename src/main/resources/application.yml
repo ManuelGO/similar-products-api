@@ -3,6 +3,9 @@ server:
 
 product-api:
   base-url: http://localhost:3001
+  connect-timeout: 500ms
+  read-timeout: 1s
 
 detail-fetch:
   pool-size: 32
+  queue-capacity: 32
