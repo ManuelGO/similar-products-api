@@ -15,3 +15,6 @@ target/
 # Environment / secrets
 .env
 .env.*
+
+# specs
+specs/
