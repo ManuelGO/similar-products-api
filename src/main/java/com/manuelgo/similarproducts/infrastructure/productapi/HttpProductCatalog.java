@@ -38,7 +38,7 @@ public class HttpProductCatalog implements ProductCatalog {
                 .retrieve()
                 .body(ID_LIST));
 
-        if (ids == null || ids.stream().anyMatch(HttpProductCatalog::isBlank)) {
+        if (ids == null || ids.stream().anyMatch(ProductApiResponse::isBlank)) {
             throw new ProductCatalogException("Malformed similar ids of product " + productId + ": " + ids);
         }
         return ids;
@@ -89,9 +89,5 @@ public class HttpProductCatalog implements ProductCatalog {
             }
         }
         return false;
-    }
-
-    private static boolean isBlank(String value) {
-        return value == null || value.isBlank();
     }
 }
