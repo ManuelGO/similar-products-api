@@ -19,7 +19,7 @@ record ProductApiResponse(String id, String name, BigDecimal price, Boolean avai
         return new Product(id, name, price, availability);
     }
 
-    private static boolean isBlank(String value) {
+    static boolean isBlank(String value) {
         return value == null || value.isBlank();
     }
 }
