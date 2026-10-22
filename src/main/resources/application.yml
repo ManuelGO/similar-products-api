@@ -9,3 +9,11 @@ product-api:
 detail-fetch:
   pool-size: 32
   queue-capacity: 32
+
+product-cache:
+  details:
+    ttl: 30s
+    max-size: 10000
+  similar-ids:
+    ttl: 5m
+    max-size: 10000

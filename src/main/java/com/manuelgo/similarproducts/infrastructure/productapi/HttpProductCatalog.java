@@ -9,7 +9,6 @@ import java.net.http.HttpTimeoutException;
 import java.util.List;
 import java.util.function.Supplier;
 import org.springframework.core.ParameterizedTypeReference;
-import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
@@ -19,7 +18,6 @@ import org.springframework.web.client.RestClientException;
  *
  * <p>Every upstream failure is translated into the domain exceptions declared by the port.
  */
-@Component
 public class HttpProductCatalog implements ProductCatalog {
 
     private static final ParameterizedTypeReference<List<String>> ID_LIST = new ParameterizedTypeReference<>() {

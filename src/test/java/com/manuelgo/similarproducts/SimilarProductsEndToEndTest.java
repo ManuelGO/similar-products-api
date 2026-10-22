@@ -49,6 +49,10 @@ class SimilarProductsEndToEndTest {
     static void pointProductApiAtUpstream(DynamicPropertyRegistry registry) {
         registry.add("product-api.base-url", upstream::baseUrl);
         registry.add("product-api.read-timeout", () -> "300ms");
+        // These tests stub the same ids differently per test, so every lookup must reach the upstream.
+        // Caching end to end is covered by ProductCacheEndToEndTest.
+        registry.add("product-cache.details.ttl", () -> "0s");
+        registry.add("product-cache.similar-ids.ttl", () -> "0s");
     }
 
     @BeforeEach
