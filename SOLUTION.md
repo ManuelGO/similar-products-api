@@ -413,3 +413,32 @@ a claimed optimum.
 - **Not implemented, by design:** retries, circuit breaker and metrics
   endpoints. None is required by the challenge, and each adds behaviour
   that would need its own justification and tuning.
+
+## 12. Development process
+
+The solution was built with AI assistance, following the spec-driven
+process defined in `CLAUDE.md`:
+
+1. For each meaningful feature, a specification was written under
+   [`specs/`](specs/). It covers the source requirements, expected
+   behaviour, acceptance criteria, edge cases, out-of-scope items and the
+   technical decisions, with the alternatives considered.
+2. Implementation started only after explicit approval of that spec. A new
+   dependency, an architectural decision or an assumption about an
+   ambiguous requirement each needed its own approval.
+3. Every acceptance criterion was verified before the spec was marked
+   implemented, and each change was reviewed before it was committed.
+
+| Spec | Feature |
+|------|---------|
+| [001](specs/001-project-bootstrap.md) | Project bootstrap, build and test tooling |
+| [002](specs/002-similar-products-retrieval.md) | The similar-products endpoint |
+| [003](specs/003-upstream-resilience.md) | Timeouts, partial results, bounded executor (§6–§7) |
+| [004](specs/004-quality-and-performance.md) | Quality analysis, performance evaluation, this document |
+| [005](specs/005-product-cache.md) | Cache of successful lookups (§5) |
+| [006](specs/006-negative-cache.md) | Cache of known failures (§5) |
+
+The specs are kept as the record of what was approved at each point. When
+a later spec changed an earlier decision, the earlier spec carries a short
+"Later change" note instead of being rewritten. Corrections to earlier
+statements are also recorded where they were made.
