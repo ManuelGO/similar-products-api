@@ -4,6 +4,7 @@ import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.notFound;
 import static com.github.tomakehurst.wiremock.client.WireMock.okJson;
+import static com.github.tomakehurst.wiremock.client.WireMock.serverError;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMockConfig;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -40,6 +41,7 @@ class ProductCacheEndToEndTest {
     @DynamicPropertySource
     static void pointProductApiAtUpstream(DynamicPropertyRegistry registry) {
         registry.add("product-api.base-url", upstream::baseUrl);
+        registry.add("product-api.read-timeout", () -> "200ms");
     }
 
     @Test
@@ -62,9 +64,13 @@ class ProductCacheEndToEndTest {
     }
 
     @Test
-    void failedLookupsAreNotCached() throws Exception {
-        upstream.stubFor(get("/product/7/similarids").willReturn(okJson("[8]")));
+    void knownFailuresOfSimilarProductsAreReusedWithinTheirTtl() throws Exception {
+        upstream.stubFor(get("/product/7/similarids").willReturn(okJson("[8,9,10]")));
         upstream.stubFor(get("/product/8").willReturn(notFound()));
+        upstream.stubFor(get("/product/9").willReturn(serverError()));
+        upstream.stubFor(get("/product/10").willReturn(okJson(
+                "{\"id\":\"10\",\"name\":\"Coat\",\"price\":89.99,\"availability\":true}")
+                .withFixedDelay(600)));
 
         HttpResponse<String> first = getSimilar("7");
         HttpResponse<String> second = getSimilar("7");
@@ -72,7 +78,9 @@ class ProductCacheEndToEndTest {
         assertThat(first.body()).isEqualTo("[]");
         assertThat(second.body()).isEqualTo("[]");
         upstream.verify(1, getRequestedFor(urlEqualTo("/product/7/similarids")));
-        upstream.verify(2, getRequestedFor(urlEqualTo("/product/8")));
+        upstream.verify(1, getRequestedFor(urlEqualTo("/product/8")));
+        upstream.verify(1, getRequestedFor(urlEqualTo("/product/9")));
+        upstream.verify(1, getRequestedFor(urlEqualTo("/product/10")));
     }
 
     private HttpResponse<String> getSimilar(String productId) throws IOException, InterruptedException {

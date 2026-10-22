@@ -18,3 +18,6 @@ target/
 
 # specs
 specs/
+
+# SonarScanner working files
+.sonar/

@@ -24,19 +24,20 @@ import java.util.function.Consumer;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 class CachingProductCatalogTest {
 
     private static final Duration DETAILS_TTL = Duration.ofSeconds(30);
     private static final Duration SIMILAR_IDS_TTL = Duration.ofMinutes(5);
+    private static final Duration NOT_FOUND_TTL = Duration.ofSeconds(20);
+    private static final Duration FAILURE_TTL = Duration.ofSeconds(5);
     private static final Duration TEST_GUARD = Duration.ofSeconds(5);
 
     private final AtomicLong nanos = new AtomicLong();
     private final CountingCatalog upstream = new CountingCatalog();
-    private final CachingProductCatalog catalog = new CachingProductCatalog(upstream, new ProductCacheProperties(
-            new ProductCacheProperties.Settings(DETAILS_TTL, 100),
-            new ProductCacheProperties.Settings(SIMILAR_IDS_TTL, 100)), nanos::get);
+    private final CachingProductCatalog catalog = catalogWithFailureTtls(NOT_FOUND_TTL, FAILURE_TTL);
 
     @Test
     void reusesAProductDetailWithinTheTtl() {
@@ -82,44 +83,80 @@ class CachingProductCatalogTest {
         assertThat(upstream.similarIdsCalls("1")).isEqualTo(2);
     }
 
-    static Stream<RuntimeException> failures() {
+    static Stream<Arguments> knownFailures() {
         return Stream.of(
-                new ProductNotFoundException("2"),
-                new ProductCatalogException("upstream error"),
-                new ProductCatalogTimeoutException("timed out", null),
-                new IllegalStateException("bug"));
+                Arguments.of(new ProductNotFoundException("2"), NOT_FOUND_TTL),
+                Arguments.of(new ProductCatalogException("upstream error"), FAILURE_TTL),
+                Arguments.of(new ProductCatalogTimeoutException("timed out", null), FAILURE_TTL));
     }
 
     @ParameterizedTest
-    @MethodSource("failures")
-    void propagatesADetailFailureUnchangedAndDoesNotCacheIt(RuntimeException failure) {
+    @MethodSource("knownFailures")
+    void reusesAKnownDetailFailureForItsTtlAndThenStoresTheNextSuccess(RuntimeException failure, Duration ttl) {
         upstream.failDetail("2", failure);
 
         assertThatThrownBy(() -> catalog.findById("2")).isSameAs(failure);
+        advance(ttl.minusNanos(1));
         assertThatThrownBy(() -> catalog.findById("2")).isSameAs(failure);
+        assertThat(upstream.detailCalls("2")).isEqualTo(1);
+
+        upstream.recoverDetail("2");
+        advance(Duration.ofNanos(1));
+        catalog.findById("2");
+        advance(DETAILS_TTL.minusNanos(1));
+        catalog.findById("2");
         assertThat(upstream.detailCalls("2")).isEqualTo(2);
     }
 
     @ParameterizedTest
-    @MethodSource("failures")
-    void propagatesASimilarIdsFailureUnchangedAndDoesNotCacheIt(RuntimeException failure) {
+    @MethodSource("knownFailures")
+    void reusesAKnownSimilarIdsFailureForItsTtlAndThenStoresTheNextSuccess(RuntimeException failure, Duration ttl) {
         upstream.failSimilarIds("1", failure);
 
         assertThatThrownBy(() -> catalog.findSimilarIds("1")).isSameAs(failure);
+        advance(ttl.minusNanos(1));
         assertThatThrownBy(() -> catalog.findSimilarIds("1")).isSameAs(failure);
+        assertThat(upstream.similarIdsCalls("1")).isEqualTo(1);
+
+        upstream.recoverSimilarIds("1");
+        advance(Duration.ofNanos(1));
+        catalog.findSimilarIds("1");
+        advance(SIMILAR_IDS_TTL.minusNanos(1));
+        catalog.findSimilarIds("1");
         assertThat(upstream.similarIdsCalls("1")).isEqualTo(2);
     }
 
     @Test
-    void cachesASuccessfulAnswerThatFollowsAFailure() {
-        upstream.failDetail("2", new ProductCatalogException("upstream error"));
-        assertThatThrownBy(() -> catalog.findById("2")).isInstanceOf(ProductCatalogException.class);
+    void neverStoresAnUnexpectedFailure() {
+        IllegalStateException bug = new IllegalStateException("bug");
+        upstream.failDetail("2", bug);
+        upstream.failSimilarIds("1", bug);
 
-        upstream.recoverDetail("2");
-        catalog.findById("2");
-        catalog.findById("2");
-
+        assertThatThrownBy(() -> catalog.findById("2")).isSameAs(bug);
+        assertThatThrownBy(() -> catalog.findById("2")).isSameAs(bug);
+        assertThatThrownBy(() -> catalog.findSimilarIds("1")).isSameAs(bug);
+        assertThatThrownBy(() -> catalog.findSimilarIds("1")).isSameAs(bug);
         assertThat(upstream.detailCalls("2")).isEqualTo(2);
+        assertThat(upstream.similarIdsCalls("1")).isEqualTo(2);
+    }
+
+    static Stream<RuntimeException> knownFailureInstances() {
+        return knownFailures().map(arguments -> (RuntimeException) arguments.get()[0]);
+    }
+
+    @ParameterizedTest
+    @MethodSource("knownFailureInstances")
+    void aZeroFailureTtlDisablesStoringThatFailure(RuntimeException failure) {
+        CachingProductCatalog withoutFailureCache = catalogWithFailureTtls(Duration.ZERO, Duration.ZERO);
+        upstream.failDetail("2", failure);
+        upstream.failSimilarIds("1", failure);
+
+        assertThatThrownBy(() -> withoutFailureCache.findById("2")).isSameAs(failure);
+        assertThatThrownBy(() -> withoutFailureCache.findById("2")).isSameAs(failure);
+        assertThatThrownBy(() -> withoutFailureCache.findSimilarIds("1")).isSameAs(failure);
+        assertThatThrownBy(() -> withoutFailureCache.findSimilarIds("1")).isSameAs(failure);
+        assertThat(upstream.detailCalls("2")).isEqualTo(2);
+        assertThat(upstream.similarIdsCalls("1")).isEqualTo(2);
     }
 
     @Test
@@ -150,36 +187,32 @@ class CachingProductCatalogTest {
         });
     }
 
-    static Stream<Throwable> sharedLoadFailures() {
-        return Stream.of(new ProductCatalogTimeoutException("timed out", null), new Error("simulated error"));
+    @Test
+    void everyCallerWaitingOnALoadThatFailsWithAKnownFailureReceivesItAndItIsStored() {
+        ProductCatalogTimeoutException failure = new ProductCatalogTimeoutException("timed out", null);
+
+        assertThat(failuresOfConcurrentCallers(failure)).hasSize(5).allMatch(e -> e == failure);
+        assertThat(upstream.detailCalls("2")).isEqualTo(1);
+
+        upstream.recoverDetail("2");
+        assertThatThrownBy(() -> catalog.findById("2")).isSameAs(failure);
+        assertThat(upstream.detailCalls("2")).isEqualTo(1);
+    }
+
+    static Stream<Throwable> unexpectedFailures() {
+        return Stream.of(new IllegalStateException("bug"), new Error("simulated error"));
     }
 
     @ParameterizedTest
-    @MethodSource("sharedLoadFailures")
-    void everyCallerWaitingOnAFailedLoadReceivesItsFailureAndNothingIsCached(Throwable failure) {
-        assertTimeoutPreemptively(TEST_GUARD, () -> {
-            BlockedLoad load = blockDetail("2", failure);
-            List<Throwable> failures = new CopyOnWriteArrayList<>();
+    @MethodSource("unexpectedFailures")
+    void everyCallerWaitingOnALoadThatFailsUnexpectedlyReceivesItsFailureAndNothingIsStored(Throwable failure) {
 
-            List<Thread> callers = startCallers(5, () -> {
-                try {
-                    catalog.findById("2");
-                } catch (RuntimeException | Error e) {
-                    failures.add(e);
-                }
-            });
-            load.awaitStarted();
-            awaitAllWaiting(callers.subList(1, callers.size()));
-            load.release();
-            joinAll(callers);
+        assertThat(failuresOfConcurrentCallers(failure)).hasSize(5).allMatch(e -> e == failure);
+        assertThat(upstream.detailCalls("2")).isEqualTo(1);
 
-            assertThat(failures).hasSize(5).allMatch(e -> e == failure);
-            assertThat(upstream.detailCalls("2")).isEqualTo(1);
-
-            upstream.recoverDetail("2");
-            catalog.findById("2");
-            assertThat(upstream.detailCalls("2")).isEqualTo(2);
-        });
+        upstream.recoverDetail("2");
+        catalog.findById("2");
+        assertThat(upstream.detailCalls("2")).isEqualTo(2);
     }
 
     @Test
@@ -196,6 +229,35 @@ class CachingProductCatalogTest {
             slow.release();
             joinAll(slowCaller);
         });
+    }
+
+    /**
+     * Five concurrent lookups of product 2, sharing one upstream call that fails with the given failure.
+     */
+    private List<Throwable> failuresOfConcurrentCallers(Throwable failure) {
+        return assertTimeoutPreemptively(TEST_GUARD, () -> {
+            BlockedLoad load = blockDetail("2", failure);
+            List<Throwable> failures = new CopyOnWriteArrayList<>();
+
+            List<Thread> callers = startCallers(5, () -> {
+                try {
+                    catalog.findById("2");
+                } catch (RuntimeException | Error e) {
+                    failures.add(e);
+                }
+            });
+            load.awaitStarted();
+            awaitAllWaiting(callers.subList(1, callers.size()));
+            load.release();
+            joinAll(callers);
+            return failures;
+        });
+    }
+
+    private CachingProductCatalog catalogWithFailureTtls(Duration notFoundTtl, Duration failureTtl) {
+        return new CachingProductCatalog(upstream, new ProductCacheProperties(
+                new ProductCacheProperties.Settings(DETAILS_TTL, notFoundTtl, failureTtl, 100),
+                new ProductCacheProperties.Settings(SIMILAR_IDS_TTL, notFoundTtl, failureTtl, 100)), nanos::get);
     }
 
     private void advance(Duration duration) {
@@ -298,6 +360,10 @@ class CachingProductCatalogTest {
 
         void failSimilarIds(String productId, RuntimeException failure) {
             similarIdsFailures.put(productId, failure);
+        }
+
+        void recoverSimilarIds(String productId) {
+            similarIdsFailures.remove(productId);
         }
 
         void failDetail(String id, RuntimeException failure) {

@@ -13,7 +13,11 @@ detail-fetch:
 product-cache:
   details:
     ttl: 30s
+    not-found-ttl: 30s
+    failure-ttl: 5s
     max-size: 10000
   similar-ids:
     ttl: 5m
+    not-found-ttl: 30s
+    failure-ttl: 5s
     max-size: 10000

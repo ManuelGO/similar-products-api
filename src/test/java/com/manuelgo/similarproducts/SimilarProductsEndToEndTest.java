@@ -53,6 +53,10 @@ class SimilarProductsEndToEndTest {
         // Caching end to end is covered by ProductCacheEndToEndTest.
         registry.add("product-cache.details.ttl", () -> "0s");
         registry.add("product-cache.similar-ids.ttl", () -> "0s");
+        registry.add("product-cache.details.not-found-ttl", () -> "0s");
+        registry.add("product-cache.details.failure-ttl", () -> "0s");
+        registry.add("product-cache.similar-ids.not-found-ttl", () -> "0s");
+        registry.add("product-cache.similar-ids.failure-ttl", () -> "0s");
     }
 
     @BeforeEach
